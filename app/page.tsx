@@ -1,8 +1,7 @@
 "use client";
 
-import { Suspense, useState, useEffect, useCallback } from "react";
+import { Suspense, useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
-import { LoginForm } from "@/components/LoginForm";
 import { Dashboard } from "@/components/Dashboard";
 
 interface Customer {
@@ -14,14 +13,7 @@ interface Customer {
   numberOfOrders: string;
 }
 
-interface SessionResponse {
-  isLoggedIn: boolean;
-  customer: Customer | null;
-  error?: string;
-  message?: string;
-}
-
-// Loading component shown during Suspense
+// Loading component
 function LoadingState() {
   return (
     <>
@@ -34,157 +26,148 @@ function LoadingState() {
   );
 }
 
-// Main content that uses useSearchParams
+// Not logged in component
+function NotLoggedIn({ shop }: { shop: string | null }) {
+  const storeUrl = shop ? `https://${shop}/account/login` : "#";
+
+  return (
+    <>
+      <div className="pattern-bg" />
+      <div className="login-page">
+        <div className="login-card">
+          <div className="login-header">
+            <div className="login-logo">🔐</div>
+            <h1 className="login-title">Please Log In</h1>
+            <p className="login-subtitle">
+              You need to be logged in to your store account to access the
+              dashboard.
+            </p>
+          </div>
+
+          <a
+            href={storeUrl}
+            className="btn btn-primary"
+            style={{
+              textDecoration: "none",
+              display: "block",
+              textAlign: "center",
+            }}
+          >
+            Log in to Store
+          </a>
+
+          <p
+            style={{
+              marginTop: "1.5rem",
+              textAlign: "center",
+              color: "var(--text-muted)",
+              fontSize: "0.875rem",
+            }}
+          >
+            After logging in, return to this page.
+          </p>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// Main content that uses App Proxy parameters
 function HomeContent() {
   const searchParams = useSearchParams();
   const [isLoading, setIsLoading] = useState(true);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [customer, setCustomer] = useState<Customer | null>(null);
-  const [authMode, setAuthMode] = useState<"session" | "proxy" | "login">(
-    "session"
-  );
+  const [error, setError] = useState<string | null>(null);
 
-  // Check if this is an App Proxy request (has signature parameter)
-  const isAppProxy =
-    searchParams.has("signature") || searchParams.has("logged_in_customer_id");
-
-  // Check if this is a Shopify Admin redirect (has hmac and shop)
-  const isShopifyRedirect =
-    searchParams.has("hmac") && searchParams.has("shop");
+  // App Proxy parameters from Shopify
+  const loggedInCustomerId = searchParams.get("logged_in_customer_id");
   const shop = searchParams.get("shop");
+  const signature = searchParams.get("signature");
 
-  const checkSession = useCallback(async () => {
-    try {
-      // If coming from App Proxy, use the proxy endpoint
-      if (isAppProxy) {
-        const proxyParams = new URLSearchParams();
-        searchParams.forEach((value, key) => {
-          proxyParams.append(key, value);
-        });
+  // Check if this is an App Proxy request
+  const isAppProxy = !!signature && !!shop;
+  const isCustomerLoggedIn = !!loggedInCustomerId;
 
-        const response = await fetch(
-          `/api/proxy/customer?${proxyParams.toString()}`
-        );
-        const data: SessionResponse = await response.json();
-
-        setIsLoggedIn(data.isLoggedIn);
-        setCustomer(data.customer);
-        setAuthMode("proxy");
+  useEffect(() => {
+    async function fetchCustomerData() {
+      // If not coming from App Proxy or customer not logged in
+      if (!isAppProxy) {
+        setIsLoading(false);
         return;
       }
 
-      // Otherwise check normal session
-      const response = await fetch("/api/auth/session");
-      const data: SessionResponse = await response.json();
+      if (!isCustomerLoggedIn) {
+        setIsLoading(false);
+        return;
+      }
 
-      setIsLoggedIn(data.isLoggedIn);
-      setCustomer(data.customer);
-      setAuthMode(data.isLoggedIn ? "session" : "login");
-    } catch (error) {
-      console.error("Session check failed:", error);
-      setIsLoggedIn(false);
-      setCustomer(null);
-      setAuthMode("login");
-    } finally {
-      setIsLoading(false);
+      try {
+        // Build the full URL to our app's API (not relative path)
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL || "";
+
+        // Pass all App Proxy parameters for verification
+        const params = new URLSearchParams();
+        searchParams.forEach((value, key) => {
+          params.append(key, value);
+        });
+
+        const response = await fetch(
+          `${appUrl}/api/proxy/customer?${params.toString()}`
+        );
+        const data = await response.json();
+
+        if (data.isLoggedIn && data.customer) {
+          setCustomer(data.customer);
+        } else {
+          setError(data.message || "Could not load customer data");
+        }
+      } catch (err) {
+        console.error("Failed to fetch customer data:", err);
+        setError("Failed to load customer data");
+      } finally {
+        setIsLoading(false);
+      }
     }
-  }, [isAppProxy, searchParams]);
 
-  useEffect(() => {
-    checkSession();
-  }, [checkSession]);
+    fetchCustomerData();
+  }, [isAppProxy, isCustomerLoggedIn, searchParams]);
 
-  const handleLoginSuccess = () => {
-    checkSession();
-  };
+  // Still loading
+  if (isLoading) {
+    return <LoadingState />;
+  }
 
-  const handleLogout = async () => {
-    try {
-      await fetch("/api/auth/logout", { method: "POST" });
-      setIsLoggedIn(false);
-      setCustomer(null);
-      setAuthMode("login");
-    } catch (error) {
-      console.error("Logout failed:", error);
-    }
-  };
-
-  // Show setup instructions if this is a Shopify redirect without proper config
-  if (isShopifyRedirect && !isAppProxy) {
+  // Not from App Proxy - show instructions
+  if (!isAppProxy) {
     return (
       <>
         <div className="pattern-bg" />
         <div className="login-page">
-          <div className="login-card" style={{ maxWidth: "600px" }}>
+          <div className="login-card" style={{ maxWidth: "500px" }}>
             <div className="login-header">
-              <div className="login-logo">🔧</div>
-              <h1 className="login-title">App Setup Required</h1>
+              <div className="login-logo">📍</div>
+              <h1 className="login-title">Access via Store</h1>
               <p className="login-subtitle">
-                Your Shopify App is redirecting here. Complete the setup to
-                enable customer authentication.
+                Please access the dashboard through your store.
               </p>
             </div>
 
-            <div style={{ textAlign: "left", fontSize: "0.9rem" }}>
-              <h3 style={{ marginBottom: "1rem" }}>Detected Shop</h3>
+            <div style={{ textAlign: "center" }}>
+              <p style={{ marginBottom: "1rem", color: "var(--text-muted)" }}>
+                Go to your store and access:
+              </p>
               <code
                 style={{
                   display: "block",
-                  padding: "0.75rem",
-                  background: "var(--bg-secondary)",
-                  borderRadius: "8px",
-                  marginBottom: "1.5rem",
-                }}
-              >
-                {shop}
-              </code>
-
-              <h3 style={{ marginBottom: "1rem" }}>Next Steps</h3>
-              <ol style={{ paddingLeft: "1.25rem", lineHeight: "2" }}>
-                <li>Configure App Proxy in Shopify Admin</li>
-                <li>Set environment variables (see below)</li>
-                <li>Access via your storefront, not admin</li>
-              </ol>
-
-              <h3 style={{ marginTop: "1.5rem", marginBottom: "1rem" }}>
-                Required Environment Variables
-              </h3>
-              <pre
-                style={{
                   padding: "1rem",
                   background: "var(--bg-secondary)",
                   borderRadius: "8px",
-                  overflow: "auto",
-                  fontSize: "0.8rem",
+                  fontSize: "0.9rem",
+                  wordBreak: "break-all",
                 }}
               >
-                {`SHOPIFY_API_KEY=your-app-api-key
-SHOPIFY_API_SECRET=your-app-api-secret
-SHOPIFY_ADMIN_ACCESS_TOKEN=from-oauth-callback
-NEXT_PUBLIC_APP_URL=https://your-app-url.com`}
-              </pre>
-
-              <h3 style={{ marginTop: "1.5rem", marginBottom: "1rem" }}>
-                App Proxy Setup
-              </h3>
-              <p style={{ marginBottom: "0.5rem" }}>
-                In your Shopify App settings, add an App Proxy:
-              </p>
-              <ul style={{ paddingLeft: "1.25rem", lineHeight: "2" }}>
-                <li>
-                  <strong>Subpath prefix:</strong> apps
-                </li>
-                <li>
-                  <strong>Subpath:</strong> dashboard
-                </li>
-                <li>
-                  <strong>Proxy URL:</strong> your-app-url.com
-                </li>
-              </ul>
-              <p style={{ marginTop: "1rem", color: "var(--text-muted)" }}>
-                Customers will access:{" "}
-                <code>https://{shop}/apps/dashboard</code>
-              </p>
+                https://your-store.myshopify.com/apps/dashboard
+              </code>
             </div>
           </div>
         </div>
@@ -192,27 +175,70 @@ NEXT_PUBLIC_APP_URL=https://your-app-url.com`}
     );
   }
 
-  if (isLoading) {
-    return <LoadingState />;
+  // App Proxy request but customer not logged in
+  if (!isCustomerLoggedIn) {
+    return <NotLoggedIn shop={shop} />;
   }
 
+  // Customer logged in but data not loaded
+  if (!customer) {
+    return (
+      <>
+        <div className="pattern-bg" />
+        <div className="login-page">
+          <div className="login-card">
+            <div className="login-header">
+              <div className="login-logo">⚠️</div>
+              <h1 className="login-title">Setup Required</h1>
+              <p className="login-subtitle">
+                {error || "Admin API token not configured"}
+              </p>
+            </div>
+
+            <div style={{ textAlign: "left", fontSize: "0.875rem" }}>
+              <p style={{ marginBottom: "1rem" }}>
+                <strong>Customer ID detected:</strong> {loggedInCustomerId}
+              </p>
+              <p style={{ marginBottom: "1rem", color: "var(--text-muted)" }}>
+                To display full customer data, configure the Admin API token.
+              </p>
+
+              <h4 style={{ marginBottom: "0.5rem" }}>Required in Amplify:</h4>
+              <code
+                style={{
+                  display: "block",
+                  padding: "0.75rem",
+                  background: "var(--bg-secondary)",
+                  borderRadius: "6px",
+                  fontSize: "0.8rem",
+                }}
+              >
+                SHOPIFY_ADMIN_ACCESS_TOKEN=shpat_xxxxx
+              </code>
+            </div>
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  // Success - show dashboard
   return (
     <>
       <div className="pattern-bg" />
-      {isLoggedIn && customer ? (
-        <Dashboard
-          customer={customer}
-          onLogout={handleLogout}
-          authMode={authMode}
-        />
-      ) : (
-        <LoginForm onSuccess={handleLoginSuccess} />
-      )}
+      <Dashboard
+        customer={customer}
+        onLogout={() => {
+          // Redirect to store logout
+          window.location.href = `https://${shop}/account/logout`;
+        }}
+        authMode="proxy"
+      />
     </>
   );
 }
 
-// Main page component with Suspense boundary
+// Main page with Suspense
 export default function Home() {
   return (
     <Suspense fallback={<LoadingState />}>
