@@ -6,6 +6,9 @@
  */
 
 import { NextResponse } from 'next/server';
+
+// Force dynamic rendering (uses cookies)
+export const dynamic = 'force-dynamic';
 import { getCustomer } from '@/lib/shopify/client';
 import { getSession, isTokenExpired } from '@/lib/session';
 

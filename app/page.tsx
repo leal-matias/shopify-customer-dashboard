@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { Suspense, useState, useEffect, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import { LoginForm } from "@/components/LoginForm";
 import { Dashboard } from "@/components/Dashboard";
@@ -21,7 +21,21 @@ interface SessionResponse {
   message?: string;
 }
 
-export default function Home() {
+// Loading component shown during Suspense
+function LoadingState() {
+  return (
+    <>
+      <div className="pattern-bg" />
+      <div className="loading-state">
+        <div className="loading-spinner" />
+        <p className="loading-text">Loading your dashboard...</p>
+      </div>
+    </>
+  );
+}
+
+// Main content that uses useSearchParams
+function HomeContent() {
   const searchParams = useSearchParams();
   const [isLoading, setIsLoading] = useState(true);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -147,7 +161,7 @@ export default function Home() {
                 {`SHOPIFY_API_KEY=your-app-api-key
 SHOPIFY_API_SECRET=your-app-api-secret
 SHOPIFY_ADMIN_ACCESS_TOKEN=from-oauth-callback
-NEXT_PUBLIC_APP_URL=https://aspectant-whitney-clannishly.ngrok-free.dev`}
+NEXT_PUBLIC_APP_URL=https://your-app-url.com`}
               </pre>
 
               <h3 style={{ marginTop: "1.5rem", marginBottom: "1rem" }}>
@@ -164,10 +178,7 @@ NEXT_PUBLIC_APP_URL=https://aspectant-whitney-clannishly.ngrok-free.dev`}
                   <strong>Subpath:</strong> dashboard
                 </li>
                 <li>
-                  <strong>Proxy URL:</strong>{" "}
-                  {typeof window !== "undefined"
-                    ? window.location.origin
-                    : "https://aspectant-whitney-clannishly.ngrok-free.dev"}
+                  <strong>Proxy URL:</strong> your-app-url.com
                 </li>
               </ul>
               <p style={{ marginTop: "1rem", color: "var(--text-muted)" }}>
@@ -182,15 +193,7 @@ NEXT_PUBLIC_APP_URL=https://aspectant-whitney-clannishly.ngrok-free.dev`}
   }
 
   if (isLoading) {
-    return (
-      <>
-        <div className="pattern-bg" />
-        <div className="loading-state">
-          <div className="loading-spinner" />
-          <p className="loading-text">Loading your dashboard...</p>
-        </div>
-      </>
-    );
+    return <LoadingState />;
   }
 
   return (
@@ -206,5 +209,14 @@ NEXT_PUBLIC_APP_URL=https://aspectant-whitney-clannishly.ngrok-free.dev`}
         <LoginForm onSuccess={handleLoginSuccess} />
       )}
     </>
+  );
+}
+
+// Main page component with Suspense boundary
+export default function Home() {
+  return (
+    <Suspense fallback={<LoadingState />}>
+      <HomeContent />
+    </Suspense>
   );
 }
